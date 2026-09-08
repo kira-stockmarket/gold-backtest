@@ -84,6 +84,48 @@ def get_price_at(df, target_date):
     return float(val.iloc[0]) if isinstance(val, pd.Series) else float(val)
 
 # 3. CORE ANALYTICS ENGINE
+def generate_excel_report(df, cluster_summary):
+    """Generates the formatted ML backtest Excel file matching the image structure."""
+    print("📊 Generating Excel ML Backtest Report...")
+    
+    # 1. Map existing data to the new requested columns
+    excel_df = pd.DataFrame()
+    excel_df['Event_ID'] = [f"EVT_{i+1:03d}" for i in range(len(df))]
+    excel_df['Event_Name'] = df['Year'].apply(lambda y: f"Diwali_{y}")
+    excel_df['T0_Date'] = pd.to_datetime(df['Diwali_Date']).dt.strftime('%d-%m-%Y')
+    
+    excel_df['Assigned_Cluster'] = df['Regime_Cluster']
+    # If you want a separate Train_Cluster, you can map it here. Using Regime for now.
+    excel_df['Train_Cluster'] = df['Regime_Cluster'] 
+    
+    # Convert percentages back to decimals for Excel (e.g., 7.11% -> 0.0711)
+    excel_df['Feature_E'] = (df['Buildup_Return_%'] / 100).round(4)
+    excel_df['Feature_P'] = (df['Pre_Diwali_15d_%'] / 100).round(4)
+    
+    # Trend helper function
+    def get_trend(val):
+        return 'uptrend' if val > 0 else 'downtrend'
+
+    # Pre-Event Predictions (Baseline model usually predicts uptrend for Gold before Diwali)
+    excel_df['Pred_Pre_Trend'] = 'uptrend' 
+    excel_df['Actual_Pre_Ret'] = excel_df['Feature_P']
+    excel_df['Actual_Pre_Trend'] = excel_df['Actual_Pre_Ret'].apply(get_trend)
+    excel_df['Pre_Success'] = excel_df['Pred_Pre_Trend'] == excel_df['Actual_Pre_Trend']
+
+    # Post-Event Predictions (Based on historical cluster averages)
+    # If the cluster's historical average is positive, we predict an uptrend.
+    cluster_means = cluster_summary.set_index('Regime_Cluster')['Avg_Post15']
+    excel_df['Pred_Post_Trend'] = df['Regime_Cluster'].map(lambda c: get_trend(cluster_means[c]))
+    
+    excel_df['Actual_Post_Ret'] = (df['Post_Diwali_15d_%'] / 100).round(4)
+    excel_df['Actual_Post_Trend'] = excel_df['Actual_Post_Ret'].apply(get_trend)
+    excel_df['Post_Success'] = excel_df['Pred_Post_Trend'] == excel_df['Actual_Post_Trend']
+
+    # 2. Save directly to the public folder for GitHub Pages
+    excel_path = os.path.join(OUTPUT_DIR, "gold_ml_backtest.xlsx")
+    excel_df.to_excel(excel_path, index=False, sheet_name="ML_Regime_Backtest")
+    print(f"✅ Saved Excel file to {excel_path}")
+
 def run_pipeline():
     print("📈 Fetching historical Gold Futures (GC=F)...")
     gold = yf.download('GC=F', start='2009-01-01', progress=False)
