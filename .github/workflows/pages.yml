@@ -1,11 +1,9 @@
-name: Deploy Predictive Gold Model
+name: Monthly Gold Clustering Deploy
 
 on:
   push:
     branches:
       - main
-  schedule:
-    - cron: '0 12 * * 1'
   workflow_dispatch:
 
 permissions:
@@ -28,39 +26,30 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Python 3.10
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-          cache: 'pip'
 
-      - name: Install Dependencies
+      - name: Install All Dependencies Directly
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install pandas numpy yfinance scikit-learn matplotlib openpyxl
 
-      - name: Run ML Predictive Engine
-        env:
-          COMTRADE_API_KEY: ${{ secrets.COMTRADE_API_KEY }} 
+      - name: Run Python Analysis Engine
         run: |
-          # 1. Force create the folder so it definitely exists
-          mkdir -p public 
-          
-          # 2. Run your Python script
-          python predict_gold_regime.py
-          
-          # 3. Print the contents of the folder to the logs to prove they generated
-          echo "--- CHECKING GENERATED FILES ---"
+          mkdir -p public
+          python gold_monthly.py
+          echo "--- Verifying Files inside public/ ---"
           ls -la public/
 
-      - name: Configure GitHub Pages
+      - name: Setup GitHub Pages
         uses: actions/configure-pages@v5
 
       - name: Upload Build Artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          # Changed from './public' to just 'public' (sometimes fixes v3 archive bugs)
-          path: 'public' 
+          path: './public'
 
       - name: Deploy to GitHub Pages
         id: deployment
