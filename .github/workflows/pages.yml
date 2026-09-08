@@ -1,12 +1,12 @@
-name: Run Gold Analytics & Deploy Pages
+name: Deploy Predictive Gold Model
 
 on:
   push:
     branches:
       - main
   schedule:
-    - cron: '0 0 1 * *'  # Runs on the 1st of every month
-  workflow_dispatch:      # Allows manual trigger in the Actions tab
+    - cron: '0 12 * * 1' # Runs every Monday at noon automatically
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -28,7 +28,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Python 3.10
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
@@ -39,20 +39,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run Analytics
+      - name: Run ML Predictive Engine
         env:
-          COMTRADE_API_KEY: ${{ secrets.COMTRADE_API_KEY }}
+          # Passes your GitHub Secret into the Python script safely
+          COMTRADE_API_KEY: ${{ secrets.COMTRADE_API_KEY }} 
         run: |
-          mkdir -p public
-          # Run Diwali seasonal backtest
-          python backtest_gold_diwali.py
-          # Run Trade data pipeline
-          python fetch_gold_trade.py
+          python predict_gold_regime.py
 
-      - name: Setup GitHub Pages
+      - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
-      - name: Upload Artifact
+      - name: Upload Build Artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: './public'
