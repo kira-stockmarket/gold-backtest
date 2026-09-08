@@ -2,6 +2,6 @@ pandas
 numpy
 yfinance
 matplotlib
-tslearn
 scikit-learn
 comtradeapicall
+openpyxl
