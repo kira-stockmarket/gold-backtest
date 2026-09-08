@@ -1,10 +1,12 @@
-name: Monthly Gold Clustering Deploy
+name: Deploy Gold Seasonal & Breakout Strategy
 
 on:
   push:
     branches:
       - main
-  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 1' # Runs automatically every Monday at midnight UTC
+  workflow_dispatch:      # Allows manual trigger anytime from the Actions tab
 
 permissions:
   contents: read
@@ -23,33 +25,53 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Code
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Setup Python 3.10
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Install All Dependencies Directly
+      - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
           pip install pandas numpy yfinance scikit-learn matplotlib openpyxl
 
-      - name: Run Python Analysis Engine
+      - name: Run Backtests & Strategy
         run: |
+          # 1. Ensure target directory exists
           mkdir -p public
-          python gold_monthly.py
-          echo "--- Verifying Files inside public/ ---"
+
+          # 2. Run monthly clustering if present
+          if [ -f "gold_monthly.py" ]; then
+            echo "Running gold_monthly.py..."
+            python gold_monthly.py
+          fi
+
+          # 3. Run seasonal breakout strategy if present
+          if [ -f "seasonal_breakout.py" ]; then
+            echo "Running seasonal_breakout.py..."
+            python seasonal_breakout.py
+          fi
+
+          # 4. Fallback index.html if one wasn't created
+          if [ ! -f "public/index.html" ]; then
+            echo "Creating fallback public/index.html..."
+            echo '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Gold Strategy Reports</title><style>body{font-family:sans-serif;margin:40px;line-height:1.6}a{display:inline-block;margin:10px 0;padding:10px 18px;background:#1F4E78;color:#fff;text-decoration:none;border-radius:6px}</style></head><body><h1>Gold Trading & Backtest Downloads</h1><p>The latest backtests have been generated successfully:</p><p><a href="gold_seasonal_breakout.xlsx" download>📥 Download August/December Breakout Excel</a></p><p><a href="gold_monthly_clusters.xlsx" download>📥 Download Monthly Clustering Excel</a></p></body></html>' > public/index.html
+          fi
+
+          # 5. Output directory contents to GitHub logs for verification
+          echo "--- Generated Files in public/ ---"
           ls -la public/
 
       - name: Setup GitHub Pages
         uses: actions/configure-pages@v5
 
-      - name: Upload Build Artifact
+      - name: Upload Artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: './public'
+          path: 'public'
 
       - name: Deploy to GitHub Pages
         id: deployment
