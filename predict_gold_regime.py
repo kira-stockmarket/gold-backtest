@@ -279,3 +279,12 @@ def generate_html(df, summary, latest, latest_regime):
 
 if __name__ == "__main__":
     run_pipeline()
+    # ... (existing visualization code)
+    plt.savefig(plot_path)
+    plt.close()
+
+    # ADD THIS LINE: Generate the Excel sheet before building the HTML
+    generate_excel_report(df, cluster_summary)
+
+    # 6. GENERATE HTML DASHBOARD
+    generate_html(df, cluster_summary, latest, latest_regime)
