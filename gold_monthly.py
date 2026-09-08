@@ -30,7 +30,6 @@ def run():
     print("Slicing every month into 15-day pre/post windows...")
     for year in range(2000, 2027):
         for month in range(1, 13):
-            # Stop if we hit future dates
             if year == 2026 and month > 9: 
                 continue
                 
@@ -88,6 +87,15 @@ def run():
     # 3. HTML Dashboard Generation
     html_path = os.path.join(OUTPUT_DIR, "index.html")
     
+    # FIX: Generate the table HTML outside of the f-string!
+    rename_dict = {
+        'Pre_15d_Ret_%': 'Avg Pre-15 Return (%)', 
+        'Post_15d_Ret_%': 'Avg Post-15 Return (%)'
+    }
+    
+    cluster_table_html = cluster_means.rename(columns=rename_dict).to_html(classes="table", float_format=lambda x: f"{x:.2f}")
+    month_dist_html = month_dist.to_html(classes="table")
+    
     html_content = f"""<!DOCTYPE html>
     <html lang="en">
     <head>
@@ -111,13 +119,13 @@ def run():
         
         <div class="card">
             <h2>Cluster Definitions (Average Returns)</h2>
-            {cluster_means.rename(columns={{'Pre_15d_Ret_%': 'Avg Pre-15 Return (%)', 'Post_15d_Ret_%': 'Avg Post-15 Return (%)'}}).to_html(classes="table")}
+            {cluster_table_html}
         </div>
 
         <div class="card">
             <h2>Which Month Matches Which Cluster Most?</h2>
             <p>This grid shows how many times each month fell into specific patterns over the last 26 years.</p>
-            {month_dist.to_html(classes="table")}
+            {month_dist_html}
         </div>
     </body>
     </html>"""
