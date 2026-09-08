@@ -8,12 +8,19 @@ import matplotlib.pyplot as plt
 from datetime import timedelta
 from sklearn.cluster import KMeans
 
+# Ensure openpyxl is installed for Excel generation
+try:
+    from openpyxl import Workbook
+    from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+    from openpyxl.utils.dataframe import dataframe_to_rows
+except ImportError:
+    print("openpyxl is required. Please ensure it is in requirements.txt.")
+
 # 1. SETUP & CONSTANTS
 OUTPUT_DIR = "public"
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 API_KEY = os.getenv("COMTRADE_API_KEY")
 
-# Dates for Diwali
 DIWALI_DATES = {
     2010: '2010-11-05', 2011: '2011-10-26', 2012: '2012-11-13',
     2013: '2013-11-03', 2014: '2014-10-23', 2015: '2015-11-11',
@@ -23,12 +30,8 @@ DIWALI_DATES = {
     2025: '2025-10-21'
 }
 
-# 2. UN COMTRADE API FETCH (With Fallback)
+# 2. UN COMTRADE API FETCH (Fixed to include missing parameters)
 def get_india_gold_imports():
-    """
-    Fetches real import volume (in Tonnes) for India (Reporter: 356) 
-    from the World (Partner: 0) for Gold (HS Code: 7108).
-    """
     fallback_data = {
         2010: 958.0, 2011: 969.0, 2012: 860.0, 2013: 825.0, 2014: 890.0, 
         2015: 915.0, 2016: 557.0, 2017: 778.0, 2018: 759.0, 2019: 690.0, 
@@ -43,14 +46,14 @@ def get_india_gold_imports():
     try:
         import comtradeapicall
         print("🔄 Connecting to UN Comtrade API for live physical trade data...")
-        
-        # Batching years as Comtrade API prefers max 12 periods per call
         years_str = "2015,2016,2017,2018,2019,2020,2021,2022,2023,2024"
         
+        # Explicitly passing the previously missing parameters as None
         df = comtradeapicall.getFinalData(
             subscription_key=API_KEY,
             typeCode='C', freqCode='A', clCode='HS', period=years_str,
-            reporterCode='356', cmdCode='7108', flowCode='M', partnerCode='0'
+            reporterCode='356', cmdCode='7108', flowCode='M', partnerCode='0',
+            partner2Code=None, customsCode=None, motCode=None
         )
         
         if df is None or df.empty:
@@ -60,10 +63,8 @@ def get_india_gold_imports():
         api_data = {}
         for _, row in df.iterrows():
             year = int(row['period'])
-            # Convert net weight from KG to Tonnes
             api_data[year] = float(row['netWgt']) / 1000.0 
             
-        # Merge live API data with historical baseline (for years prior to 2015)
         for y in fallback_data:
             if y not in api_data:
                 api_data[y] = fallback_data[y]
@@ -83,37 +84,26 @@ def get_price_at(df, target_date):
     val = sub.iloc[-1]
     return float(val.iloc[0]) if isinstance(val, pd.Series) else float(val)
 
-# 3. CORE ANALYTICS ENGINE
+# 3. EXCEL EXPORT (Matches your requested format)
 def generate_excel_report(df, cluster_summary):
-    """Generates the formatted ML backtest Excel file matching the image structure."""
     print("📊 Generating Excel ML Backtest Report...")
-    
-    # 1. Map existing data to the new requested columns
     excel_df = pd.DataFrame()
     excel_df['Event_ID'] = [f"EVT_{i+1:03d}" for i in range(len(df))]
     excel_df['Event_Name'] = df['Year'].apply(lambda y: f"Diwali_{y}")
     excel_df['T0_Date'] = pd.to_datetime(df['Diwali_Date']).dt.strftime('%d-%m-%Y')
-    
     excel_df['Assigned_Cluster'] = df['Regime_Cluster']
-    # If you want a separate Train_Cluster, you can map it here. Using Regime for now.
-    excel_df['Train_Cluster'] = df['Regime_Cluster'] 
+    excel_df['Train_Clus'] = df['Regime_Cluster']  # Utilizing the K-Means cluster here
     
-    # Convert percentages back to decimals for Excel (e.g., 7.11% -> 0.0711)
     excel_df['Feature_E'] = (df['Buildup_Return_%'] / 100).round(4)
     excel_df['Feature_P'] = (df['Pre_Diwali_15d_%'] / 100).round(4)
     
-    # Trend helper function
-    def get_trend(val):
-        return 'uptrend' if val > 0 else 'downtrend'
+    def get_trend(val): return 'uptrend' if val > 0 else 'downtrend'
 
-    # Pre-Event Predictions (Baseline model usually predicts uptrend for Gold before Diwali)
-    excel_df['Pred_Pre_Trend'] = 'uptrend' 
+    excel_df['Pred_Pre_Trend'] = 'uptrend'
     excel_df['Actual_Pre_Ret'] = excel_df['Feature_P']
     excel_df['Actual_Pre_Trend'] = excel_df['Actual_Pre_Ret'].apply(get_trend)
     excel_df['Pre_Success'] = excel_df['Pred_Pre_Trend'] == excel_df['Actual_Pre_Trend']
 
-    # Post-Event Predictions (Based on historical cluster averages)
-    # If the cluster's historical average is positive, we predict an uptrend.
     cluster_means = cluster_summary.set_index('Regime_Cluster')['Avg_Post15']
     excel_df['Pred_Post_Trend'] = df['Regime_Cluster'].map(lambda c: get_trend(cluster_means[c]))
     
@@ -121,11 +111,51 @@ def generate_excel_report(df, cluster_summary):
     excel_df['Actual_Post_Trend'] = excel_df['Actual_Post_Ret'].apply(get_trend)
     excel_df['Post_Success'] = excel_df['Pred_Post_Trend'] == excel_df['Actual_Post_Trend']
 
-    # 2. Save directly to the public folder for GitHub Pages
-    excel_path = os.path.join(OUTPUT_DIR, "gold_ml_backtest.xlsx")
-    excel_df.to_excel(excel_path, index=False, sheet_name="ML_Regime_Backtest")
-    print(f"✅ Saved Excel file to {excel_path}")
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "ML_Regime_Backtest"
 
+    header_fill = PatternFill(start_color="34495E", end_color="34495E", fill_type="solid")
+    header_font = Font(color="FFFFFF", bold=True)
+    align_center = Alignment(horizontal="center", vertical="center")
+    thin_border = Border(left=Side(style='thin', color='BDC3C7'), right=Side(style='thin', color='BDC3C7'),
+                         top=Side(style='thin', color='BDC3C7'), bottom=Side(style='thin', color='BDC3C7'))
+
+    headers = ['Event_ID', 'Event_Name', 'T0_Date', 'Assigned_', 'Train_Clus', 'Feature_E', 'Feature_P', 
+               'Pred_Pre_', 'Actual_Pre', 'Actual_Pre', 'Pre_Secto', 'Pred_Post', 'Actual_Po', 'Actual_Po', 'Post_Secto']
+    ws.append(headers)
+    for col in range(1, len(headers) + 1):
+        cell = ws.cell(row=1, column=col)
+        cell.fill = header_fill; cell.font = header_font; cell.alignment = align_center; cell.border = thin_border
+
+    for r in dataframe_to_rows(excel_df, index=False, header=False):
+        ws.append(r)
+
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row, min_col=1, max_col=len(headers)):
+        for cell in row:
+            cell.border = thin_border; cell.alignment = align_center
+            if cell.column in [6, 7, 9, 13]: cell.number_format = '0.0000'
+            if cell.column in [11, 15]:
+                cell.font = Font(color="27AE60", bold=True) if cell.value == True else Font(color="C0392B", bold=True)
+            if cell.column in [8, 10, 12, 14]:
+                if cell.value == 'uptrend': cell.font = Font(color="27AE60")
+                elif cell.value == 'downtrend': cell.font = Font(color="C0392B")
+
+    for col in ws.columns:
+        max_length = 0
+        column = col[0].column_letter
+        for cell in col:
+            try:
+                if len(str(cell.value)) > max_length: max_length = len(str(cell.value))
+            except: pass
+        ws.column_dimensions[column].width = max_length + 3
+    ws.freeze_panes = "A2"
+
+    excel_path = os.path.join(OUTPUT_DIR, "gold_ml_backtest.xlsx")
+    wb.save(excel_path)
+    print(f"✅ Excel saved to {excel_path}")
+
+# 4. CORE ENGINE & HTML GENERATOR
 def run_pipeline():
     print("📈 Fetching historical Gold Futures (GC=F)...")
     gold = yf.download('GC=F', start='2009-01-01', progress=False)
@@ -151,7 +181,7 @@ def run_pipeline():
         if any(pd.isna(x) for x in [p_45, p_15, p_diwali, p_post]):
             continue
 
-        annual_imports = imports_data.get(year, 700.0) # Default to 700 if missing
+        annual_imports = imports_data.get(year, 700.0) 
         build_up_return = ((p_15 - p_45) / p_45) * 100
         pre_event_return = ((p_diwali - p_15) / p_15) * 100
         post_event_return = ((p_post - p_diwali) / p_diwali) * 100
@@ -166,9 +196,6 @@ def run_pipeline():
         })
 
     df = pd.DataFrame(records)
-
-    # 4. K-MEANS REGIME CLUSTERING
-    # We cluster based on pre-Diwali momentum + Physical Import Volumes
     X = df[['Buildup_Return_%', 'Pre_Diwali_15d_%', 'Imports_Tons']].values
     kmeans = KMeans(n_clusters=3, random_state=42, n_init=10)
     df['Regime_Cluster'] = kmeans.fit_predict(X)
@@ -180,14 +207,10 @@ def run_pipeline():
         Post_WinRate=('Post_Diwali_15d_%', lambda x: (x > 0).mean() * 100)
     ).reset_index()
 
-    # Automatically name the regimes based on behavior
     def name_regime(row):
-        if row['Avg_Pre15'] > 1.0 and row['Avg_Post15'] < 0:
-            return "Exhaustion Spike (Sell-the-Fact)"
-        elif row['Avg_Post15'] > 0.5:
-            return "Sustained Rally (Follow-through)"
-        else:
-            return "Macro Chop (Consolidation)"
+        if row['Avg_Pre15'] > 1.0 and row['Avg_Post15'] < 0: return "Exhaustion Spike (Sell-the-Fact)"
+        elif row['Avg_Post15'] > 0.5: return "Sustained Rally (Follow-through)"
+        else: return "Macro Chop (Consolidation)"
 
     cluster_summary['Regime_Name'] = cluster_summary.apply(name_regime, axis=1)
     df = df.merge(cluster_summary[['Regime_Cluster', 'Regime_Name']], on='Regime_Cluster', how='left')
@@ -195,7 +218,7 @@ def run_pipeline():
     latest = df.iloc[-1]
     latest_regime = cluster_summary[cluster_summary['Regime_Cluster'] == latest['Regime_Cluster']].iloc[0]
 
-    # 5. GENERATE VIZ
+    # Explicitly define plot path and save figure
     plot_path = os.path.join(OUTPUT_DIR, "predictive_clusters.png")
     fig, ax = plt.subplots(figsize=(10, 5))
     colors = ['#3498db', '#e74c3c', '#2ecc71']
@@ -215,7 +238,8 @@ def run_pipeline():
     plt.savefig(plot_path)
     plt.close()
 
-    # 6. GENERATE HTML DASHBOARD
+    # Generate outputs
+    generate_excel_report(df, cluster_summary)
     generate_html(df, cluster_summary, latest, latest_regime)
 
 def generate_html(df, summary, latest, latest_regime):
@@ -233,7 +257,7 @@ def generate_html(df, summary, latest, latest_regime):
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gold Seasonal Prediction Engine</title>
+    <title>Gold Seasonal ML Prediction Engine</title>
     <style>
         body {{ font-family: -apple-system, BlinkMacSystemFont, sans-serif; margin: 30px auto; max-width: 900px; padding: 0 20px; color: #1e293b; background: #f8fafc; }}
         .prediction-card {{ background: #fff; border: 2px solid #3b82f6; border-radius: 12px; padding: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }}
@@ -246,10 +270,12 @@ def generate_html(df, summary, latest, latest_regime):
         table {{ width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; margin-top: 15px; border: 1px solid #e2e8f0; }}
         th, td {{ padding: 10px; text-align: left; border-bottom: 1px solid #e2e8f0; }}
         th {{ background: #f8fafc; color: #475569; }}
+        .dl-btn {{ display: inline-block; background: #27ae60; color: #fff; padding: 10px 15px; text-decoration: none; border-radius: 5px; font-weight: bold; margin-bottom: 15px; }}
     </style>
 </head>
 <body>
-    <h1>Gold Algorithmic Backtester (Comtrade API + Yahoo Finance)</h1>
+    <h1>Gold Backtester (Comtrade + Yahoo Finance)</h1>
+    <a href="gold_ml_backtest.xlsx" download class="dl-btn">📥 Download ML Excel Data</a>
     
     <div class="prediction-card">
         <span class="badge">Live ML Prediction Engine</span>
@@ -264,11 +290,9 @@ def generate_html(df, summary, latest, latest_regime):
 
     <h2>Regime Clustering Analysis</h2>
     <img src="predictive_clusters.png" alt="Cluster Plot">
-
     <h2>Regime Profiles</h2>
     {summary_table}
-
-    <h2>Full UN Comtrade & Price Ledger</h2>
+    <h2>Full Ledger</h2>
     {history_table}
 </body>
 </html>"""
@@ -279,12 +303,3 @@ def generate_html(df, summary, latest, latest_regime):
 
 if __name__ == "__main__":
     run_pipeline()
-    # ... (existing visualization code)
-    plt.savefig(plot_path)
-    plt.close()
-
-    # ADD THIS LINE: Generate the Excel sheet before building the HTML
-    generate_excel_report(df, cluster_summary)
-
-    # 6. GENERATE HTML DASHBOARD
-    generate_html(df, cluster_summary, latest, latest_regime)
