@@ -5,7 +5,7 @@ on:
     branches:
       - main
   schedule:
-    - cron: '0 12 * * 1' # Runs every Monday at noon automatically
+    - cron: '0 12 * * 1'
   workflow_dispatch:
 
 permissions:
@@ -41,10 +41,17 @@ jobs:
 
       - name: Run ML Predictive Engine
         env:
-          # Passes your GitHub Secret into the Python script safely
           COMTRADE_API_KEY: ${{ secrets.COMTRADE_API_KEY }} 
         run: |
+          # 1. Force create the folder so it definitely exists
+          mkdir -p public 
+          
+          # 2. Run your Python script
           python predict_gold_regime.py
+          
+          # 3. Print the contents of the folder to the logs to prove they generated
+          echo "--- CHECKING GENERATED FILES ---"
+          ls -la public/
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
@@ -52,7 +59,8 @@ jobs:
       - name: Upload Build Artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: './public'
+          # Changed from './public' to just 'public' (sometimes fixes v3 archive bugs)
+          path: 'public' 
 
       - name: Deploy to GitHub Pages
         id: deployment
