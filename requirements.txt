@@ -4,3 +4,4 @@ yfinance
 matplotlib
 tslearn
 scikit-learn
+comtradeapicall
